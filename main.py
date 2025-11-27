@@ -5,9 +5,6 @@ import time
 
 
 def parse_arguments() -> argparse.Namespace:
-    """
-    Parse command-line arguments for launching Brave.
-    """
     parser = argparse.ArgumentParser(
         description="Brave Profile Smoke Tester - Test multiple Brave Profiles"
     )
@@ -17,71 +14,89 @@ def parse_arguments() -> argparse.Namespace:
         help='Full path to brave.exe file'
     )
     parser.add_argument(
-        '--profile-path',
+        '--profiles-root',
         required=True,
-        help='Path to a single profile directory (temporary - will be replaced with --profiles-root later)'
-    ) # TODO: change to --profiles-root
+        help='Path to the root folder containing multiple Brave profiles'
+    )
     parser.add_argument(
         '--url',
         default='https://brave.com',
-        help='URL to navigate to (default: https://brave.com)'
+        help='URL to navigate to'
     )
     parser.add_argument(
         '--headless',
         action='store_true',
         default=False,
-        help='Run browser in headless mode (default: False)'
+        help='Run browser in headless mode'
     )
     parser.add_argument(
         '--page-load-timeout',
         type=int,
         default=30000,
-        help='Timeout in milliseconds for page load (default: 30000)'
+        help='Timeout in milliseconds for page load'
     )
     return parser.parse_args()
 
+
+def find_profiles(root_dir: str) -> list:
+    root_path = Path(root_dir)
+    if not root_path.exists() or not root_path.is_dir():
+        print(f"Profiles root folder does not exist: {root_dir}")
+        return []
+
+    profiles = [str(p) for p in root_path.iterdir() if p.is_dir()]
+    return profiles
+
+
 def launch_brave_with_profile(
-        brave_path: str, 
-        profile_path: str, 
-        url: str, 
-        headless: bool = False
+        brave_path: str,
+        profile_path: str,
+        url: str,
+        headless: bool = False,
+        timeout: int = 10000
 ) -> None:
-    """
-    Launch Brave browser with a specific profile and navigate to URL.
-    
-    Args:
-        brave_path: Path to Brave executable
-        profile_path: Path to profile directory
-        url: URL to navigate to
-        headless: Whether to run in headless mode
-    """
-    # Create profile directory if it doesn't exist
     profile_dir: Path = Path(profile_path)
     profile_dir.mkdir(parents=True, exist_ok=True)
-    
+
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
             user_data_dir=str(profile_dir),
             executable_path=brave_path,
             headless=headless
         )
-        time.sleep(3)
-        context.close()
+        page = context.new_page()
+        try:
+            page.goto(url, timeout=timeout, wait_until="load")
+        finally:
+            time.sleep(1)
+            context.close()
 
 
 def main() -> None:
-    """
-        Main entry point for the smoke tester.
-    """
     args = parse_arguments()
-    
-    launch_brave_with_profile(
-        brave_path=args.brave_path,
-        profile_path=args.profile_path,
-        url=args.url,
-        headless=args.headless
-    )
-    print("Test completed")
+    profiles = find_profiles(args.profiles_root)
+
+    if not profiles:
+        print("No profiles found.")
+        return
+
+    print("Testing profiles:")
+
+    for profile in profiles:
+        print(f"  Launching profile: {profile}")
+        try:
+            launch_brave_with_profile(
+                brave_path=args.brave_path,
+                profile_path=profile,
+                url=args.url,
+                headless=args.headless,
+                timeout=args.page_load_timeout
+            )
+            print(f"  Profile {profile} -> PASS")
+        except Exception as e:
+            print(f"  Profile {profile} -> FAIL ({e})")
+
+    print("All profiles tested")
 
 
 if __name__ == "__main__":
