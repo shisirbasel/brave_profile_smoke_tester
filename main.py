@@ -2,11 +2,14 @@ import sys
 import time
 import argparse
 from pathlib import Path
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError
+
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for Brave smoke tester."""
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Brave Profile Smoke Tester - Test multiple Brave profiles"
+    )
     parser.add_argument(
         '--brave-path',
         required=True,
@@ -37,14 +40,34 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def validate_brave_path(brave_path: str) -> None:
+    """
+    Validate that the Brave executable path exists.
+    Exit immediately if the path is invalid.
+    """
+    brave_file = Path(brave_path)
+    
+    if not brave_file.exists():
+        print(f"Error: Brave executable not found at: {brave_path}")
+        print("Please check the --brave-path argument and try again.")
+        sys.exit(1)
+    
+    if not brave_file.is_file():
+        print(f"Error: Path is not a file: {brave_path}")
+        sys.exit(1)
+
+
 def find_profiles(root_dir: str) -> list:
-    """Return a list of profile directories inside the given root folder."""
+    """
+    Return a sorted list of profile directories inside the given root folder.
+    """
     root_path = Path(root_dir)
     if not root_path.exists() or not root_path.is_dir():
-        print(f"Profiles root folder does not exist: {root_dir}")
-        return []
+        print(f"Error: Profiles root folder does not exist: {root_dir}")
+        sys.exit(1)
 
-    profiles = [str(p) for p in root_path.iterdir() if p.is_dir()]
+    # Get all subdirectories and sort them alphabetically for deterministic ordering
+    profiles = sorted([str(p) for p in root_path.iterdir() if p.is_dir()])
     return profiles
 
 
@@ -52,12 +75,26 @@ def launch_brave_with_profile(
         brave_path: str,
         profile_path: str,
         url: str,
-        headless: bool = False,
-        timeout: int = 10000
+        headless: bool,
+        timeout: int
 ) -> None:
-    """Launch Brave with a specific profile and navigate to a URL."""
-    profile_dir: Path = Path(profile_path)
-    profile_dir.mkdir(parents=True, exist_ok=True)
+    """
+    Launch Brave with a specific profile and navigate to a URL.
+    
+    Raises:
+        FileNotFoundError: If profile directory doesn't exist
+        NotADirectoryError: If profile path is not a directory
+        PlaywrightTimeoutError: If page navigation times out
+        PlaywrightError: If browser fails to launch or other Playwright errors
+    """
+    profile_dir = Path(profile_path)
+    
+    # Fail if profile directory doesn't exist (don't create it)
+    if not profile_dir.exists():
+        raise FileNotFoundError(f"Profile directory does not exist: {profile_path}")
+    
+    if not profile_dir.is_dir():
+        raise NotADirectoryError(f"Profile path is not a directory: {profile_path}")
 
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
@@ -65,12 +102,18 @@ def launch_brave_with_profile(
             executable_path=brave_path,
             headless=headless
         )
-        page = context.new_page()
+        
+        # Use existing page instead of creating new one
+        if context.pages:
+            page = context.pages[0]
+        else:
+            page = context.new_page()
+        
         try:
             page.goto(url, timeout=timeout, wait_until="load")
         finally:
-            # Close the browser after navigation
-            time.sleep(1)
+            if not headless:
+                time.sleep(1)
             context.close()
 
 
@@ -83,7 +126,8 @@ def print_summary(results: dict) -> None:
     for profile, result in results.items():
         status = result["status"]
         message = result["message"]
-        print(f"Profile: {Path(profile).name:<20} -> {status} ({message})")
+        profile_name = Path(profile).name
+        print(f"Profile: {profile_name:<20} -> {status} ({message})")
         if status == "PASS":
             pass_count += 1
         else:
@@ -97,17 +141,23 @@ def print_summary(results: dict) -> None:
 def main() -> None:
     """Main entry point: parse args, test profiles, and print summary."""
     args = parse_arguments()
+
+    # Validate Brave path before doing anything else
+    validate_brave_path(args.brave_path)
+
     profiles = find_profiles(args.profiles_root)
 
     if not profiles:
-        print("No profiles found.")
+        print("Error: No profile directories found.")
         sys.exit(1)
 
     print("Testing profiles:")
     results = {}
 
     for profile in profiles:
-        print(f"  Launching profile: {profile}")
+        profile_name = Path(profile).name
+        print(f"  Launching profile: {profile_name}")
+        
         try:
             launch_brave_with_profile(
                 brave_path=args.brave_path,
@@ -117,11 +167,28 @@ def main() -> None:
                 timeout=args.page_load_timeout
             )
             results[profile] = {"status": "PASS", "message": "OK"}
-        except Exception as e:
+            
+        except FileNotFoundError as e:
             results[profile] = {"status": "FAIL", "message": str(e)}
+            
+        except NotADirectoryError as e:
+            results[profile] = {"status": "FAIL", "message": str(e)}
+            
+        except PlaywrightTimeoutError:
+            results[profile] = {"status": "FAIL", "message": f"Timeout loading {args.url}"}
+            
+        except PlaywrightError as e:
+            error_msg = str(e).split('\n')[0]
+            results[profile] = {"status": "FAIL", "message": f"Browser error: {error_msg}"}
+            
+        except Exception as e:
+            error_type = type(e).__name__
+            error_msg = str(e).split('\n')[0][:100]
+            results[profile] = {"status": "FAIL", "message": f"{error_type}: {error_msg}"}
 
     print_summary(results)
 
+    # Exit with appropriate code
     if any(r["status"] == "FAIL" for r in results.values()):
         sys.exit(1)
     sys.exit(0)
