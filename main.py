@@ -2,9 +2,11 @@ from playwright.sync_api import sync_playwright
 from pathlib import Path
 import argparse
 import time
+import sys
 
 
 def parse_arguments() -> argparse.Namespace:
+    # Parse command-line arguments
     parser = argparse.ArgumentParser(
         description="Brave Profile Smoke Tester - Test multiple Brave Profiles"
     )
@@ -20,7 +22,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         '--url',
-        default='https://brave.com',
+        required=True,
         help='URL to navigate to'
     )
     parser.add_argument(
@@ -39,6 +41,7 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def find_profiles(root_dir: str) -> list:
+    # Get all subdirectories in the profiles root folder
     root_path = Path(root_dir)
     if not root_path.exists() or not root_path.is_dir():
         print(f"Profiles root folder does not exist: {root_dir}")
@@ -55,6 +58,7 @@ def launch_brave_with_profile(
         headless: bool = False,
         timeout: int = 10000
 ) -> None:
+    # Launch Brave with a specific profile and navigate to the URL
     profile_dir: Path = Path(profile_path)
     profile_dir.mkdir(parents=True, exist_ok=True)
 
@@ -68,8 +72,31 @@ def launch_brave_with_profile(
         try:
             page.goto(url, timeout=timeout, wait_until="load")
         finally:
+            # Close the browser after navigation
             time.sleep(1)
             context.close()
+
+
+def print_summary(results: dict) -> None:
+    # Print a clean summary table of profile test results
+    print("\n======== Summary ========")
+    pass_count = 0
+    fail_count = 0
+
+    for profile, result in results.items():
+        status = result["status"]
+        message = result["message"]
+        # Show profile name, status, and message
+        print(f"Profile: {Path(profile).name:<20} -> {status} ({message})")
+        if status == "PASS":
+            pass_count += 1
+        else:
+            fail_count += 1
+
+    # Print total counts
+    print(f"\nTotal profiles: {len(results)}")
+    print(f"PASS: {pass_count}")
+    print(f"FAIL: {fail_count}")
 
 
 def main() -> None:
@@ -78,13 +105,15 @@ def main() -> None:
 
     if not profiles:
         print("No profiles found.")
-        return
+        sys.exit(1)
 
     print("Testing profiles:")
+    results = {}
 
     for profile in profiles:
         print(f"  Launching profile: {profile}")
         try:
+            # Attempt to launch Brave and navigate
             launch_brave_with_profile(
                 brave_path=args.brave_path,
                 profile_path=profile,
@@ -92,11 +121,19 @@ def main() -> None:
                 headless=args.headless,
                 timeout=args.page_load_timeout
             )
-            print(f"  Profile {profile} -> PASS")
+            # Mark profile as PASS if no exception occurs
+            results[profile] = {"status": "PASS", "message": "OK"}
         except Exception as e:
-            print(f"  Profile {profile} -> FAIL ({e})")
+            # Mark profile as FAIL if any error occurs
+            results[profile] = {"status": "FAIL", "message": str(e)}
 
-    print("All profiles tested")
+    # Print summary after all profiles tested
+    print_summary(results)
+
+    # Exit with non-zero code if any profile failed
+    if any(r["status"] == "FAIL" for r in results.values()):
+        sys.exit(1)
+    sys.exit(0)
 
 
 if __name__ == "__main__":
