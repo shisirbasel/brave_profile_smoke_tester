@@ -56,6 +56,42 @@ def validate_brave_path(brave_path: str) -> None:
         print(f"Error: Path is not a file: {brave_path}")
         sys.exit(1)
 
+def validate_url(url: str) -> None:
+    """
+    Validate that the URL is properly formatted.
+    Exit immediately if the URL is invalid.
+    """
+    # Check if URL is empty
+    if not url or url.strip() == "":
+        print("Error: URL cannot be empty")
+        sys.exit(1)
+    
+    # Allow chrome:// URLs for testing (crash URLs, etc.)
+    if url.startswith("chrome://") or url.startswith("brave://"):
+        return
+    
+    # Check if URL has a valid scheme (http:// or https://)
+    if not url.startswith("http://") and not url.startswith("https://"):
+        print(f"Error: URL must start with http://, https://, or chrome://")
+        print(f"Invalid URL: {url}")
+        sys.exit(1)
+    
+    # Basic check for at least a domain after the scheme
+    url_without_scheme = url.replace("https://", "").replace("http://", "")
+    if not url_without_scheme or url_without_scheme == "/":
+        print(f"Error: URL must start with http://, https://, or chrome://")
+        sys.exit(1)
+    
+    domain = url_without_scheme.split('/')[0]  # Get domain part only
+    if '.' not in domain and not domain == 'localhost':
+        print(f"Error: URL domain appears to be invalid (missing TLD): {url}")
+        print(f"Example of valid URL: https://brave.com")
+        sys.exit(1)
+
+def validate_timeout(timeout:int)->None:
+    if timeout < 1000:
+        print("Error: --page-load-timeout must be at least 1000ms (1 second)")
+        sys.exit(1)
 
 def find_profiles(root_dir: str) -> list:
     """
@@ -113,7 +149,7 @@ def launch_brave_with_profile(
             page.goto(url, timeout=timeout, wait_until="load")
         finally:
             if not headless:
-                time.sleep(1)
+                time.sleep(1) # Wait 1 second so we can see the browser window
             context.close()
 
 
@@ -144,6 +180,12 @@ def main() -> None:
 
     # Validate Brave path before doing anything else
     validate_brave_path(args.brave_path)
+
+    # Validate url
+    validate_url(args.url)
+
+    #Validate timeout
+    validate_timeout(args.page_load_timeout)
 
     profiles = find_profiles(args.profiles_root)
 
