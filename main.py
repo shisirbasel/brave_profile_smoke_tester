@@ -1,15 +1,12 @@
-from playwright.sync_api import sync_playwright
-from pathlib import Path
-import argparse
-import time
 import sys
-
+import time
+import argparse
+from pathlib import Path
+from playwright.sync_api import sync_playwright
 
 def parse_arguments() -> argparse.Namespace:
     # Parse command-line arguments
-    parser = argparse.ArgumentParser(
-        description="Brave Profile Smoke Tester - Test multiple Brave Profiles"
-    )
+    parser = argparse.ArgumentParser()
     parser.add_argument(
         '--brave-path',
         required=True,
