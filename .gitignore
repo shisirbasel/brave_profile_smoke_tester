@@ -1,3 +1,4 @@
 env/
 profiles/
 __pycache__/
+.vscode/
