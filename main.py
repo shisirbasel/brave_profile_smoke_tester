@@ -72,16 +72,22 @@ def validate_url(url: str) -> None:
     
     # Check if URL has a valid scheme (http:// or https://)
     if not url.startswith("http://") and not url.startswith("https://"):
-        print(f"Error: URL must start with http://, https://, or chrome://")
+        print(f"Error: URL must start with http://, https://, brave:// or chrome://")
         print(f"Invalid URL: {url}")
         sys.exit(1)
     
-    # Basic check for at least a domain after the scheme
-    url_without_scheme = url.replace("https://", "").replace("http://", "")
+    # Basic check for at least something after the scheme
+    url_without_scheme = (
+        url.replace("https://", "")
+        .replace("http://", "")
+        .replace("brave://", "")
+        .replace("chrome://", "")
+    )
+
     if not url_without_scheme or url_without_scheme == "/":
-        print(f"Error: URL must start with http://, https://, or chrome://")
+        print("Error: URL must contain a valid path or domain after the scheme")
         sys.exit(1)
-    
+        
     domain = url_without_scheme.split('/')[0]  # Get domain part only
     if '.' not in domain and not domain == 'localhost':
         print(f"Error: URL domain appears to be invalid (missing TLD): {url}")
